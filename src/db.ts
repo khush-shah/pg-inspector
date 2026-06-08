@@ -8,9 +8,11 @@ export function createPool(connectionString: string): Pool {
     max: 5,
     idleTimeoutMillis: 10000,
     connectionTimeoutMillis: 10000,
-    ssl: connectionString.includes('sslmode=require')
+    ssl: connectionString.includes('neon.tech')
       ? { rejectUnauthorized: false }
-      : undefined,
+      : connectionString.includes('sslmode=require')
+        ? { rejectUnauthorized: false }
+        : undefined,
   });
   return pool;
 }
