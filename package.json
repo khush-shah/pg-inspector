@@ -48,14 +48,15 @@
     "cli-table3": "^0.6.3",
     "commander": "^12.0.0",
     "ora": "^5.4.1",
-    "pg": "^8.11.5"
+    "pg": "^8.11.5",
+    "snyk": "^1.1305.1"
   },
   "devDependencies": {
     "@types/node": "^20.12.0",
     "@types/pg": "^8.11.5",
+    "ts-node": "^10.9.2",
     "typescript": "^5.4.0",
-    "vitest": "^1.4.0",
-    "ts-node": "^10.9.2"
+    "vitest": "^1.4.0"
   },
   "engines": {
     "node": ">=18.0.0"
