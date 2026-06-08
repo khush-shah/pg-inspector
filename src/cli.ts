@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 import { Command } from 'commander';
 import ora from 'ora';
 import { analyze } from './index';
@@ -12,7 +10,7 @@ const program = new Command();
 program
   .name('pg-inspector')
   .description('PostgreSQL query health CLI — slow queries, index advice, N+1 detection, lock analysis')
-  .version('0.1.0');
+  .version('0.1.2');
 
 program
   .command('analyze')
