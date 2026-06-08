@@ -1,0 +1,63 @@
+{
+  "name": "pg-inspector",
+  "version": "0.1.0",
+  "description": "PostgreSQL query health CLI — slow query detection, index advice, N+1 finder, lock analysis, health score",
+  "keywords": [
+    "postgresql",
+    "postgres",
+    "performance",
+    "cli",
+    "database",
+    "slow-query",
+    "index",
+    "n+1",
+    "health",
+    "devtools"
+  ],
+  "author": "Khush Shah <kshah17121@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/khush-shah/pg-inspector#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/khush-shah/pg-inspector.git"
+  },
+  "bugs": {
+    "url": "https://github.com/khush-shah/pg-inspector/issues"
+  },
+  "bin": {
+    "pg-inspector": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src --ext .ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "cli-table3": "^0.6.3",
+    "commander": "^12.0.0",
+    "ora": "^8.0.1",
+    "pg": "^8.11.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.0",
+    "@types/pg": "^8.11.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.8"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
