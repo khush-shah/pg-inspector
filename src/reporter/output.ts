@@ -30,7 +30,7 @@ export function renderHtml(result: AnalysisResult, outFile?: string): void {
     result.slowQueries.length === 0
       ? '<p class="ok">✓ No slow queries detected</p>'
       : `<table>
-          <thead><tr><th>Query</th><th>Calls</th><th>Mean (ms)</th><th>P95 (ms)</th><th>Cache Hit%</th></tr></thead>
+          <thead><tr><th>Query</th><th>Calls</th><th>Mean (ms)</th><th>Max (ms)</th><th>Cache Hit%</th></tr></thead>
           <tbody>
             ${result.slowQueries
         .map(
@@ -39,7 +39,7 @@ export function renderHtml(result: AnalysisResult, outFile?: string): void {
                     <td class="mono">${escHtml(q.query.slice(0, 120))}</td>
                     <td>${q.calls.toLocaleString()}</td>
                     <td class="${q.meanTimeMs > 500 ? 'warn' : ''}">${q.meanTimeMs}</td>
-                    <td>${q.p95TimeMs}</td>
+                    <td>${q.maxTimeMs}</td>
                     <td class="${q.hitPercent < 90 ? 'warn' : ''}">${q.hitPercent}%</td>
                   </tr>`
         )

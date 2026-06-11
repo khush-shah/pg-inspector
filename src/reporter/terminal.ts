@@ -70,7 +70,7 @@ export function renderTerminal(result: AnalysisResult, noColor = false): void {
     console.log(chalk.green('  ✓ No slow queries detected'));
   } else {
     const t = new Table({
-      head: ['Query', 'Calls', 'Mean (ms)', 'P95 (ms)', 'Cache Hit%'].map((h) =>
+      head: ['Query', 'Calls', 'Mean (ms)', 'Max (ms)', 'Cache Hit%'].map((h) =>
         chalk.bold.white(h)
       ),
       colWidths: [40, 8, 10, 10, 12],
@@ -83,7 +83,7 @@ export function renderTerminal(result: AnalysisResult, noColor = false): void {
         chalk.gray(q.query.slice(0, 38)),
         q.calls.toLocaleString(),
         meanColor(q.meanTimeMs),
-        chalk.gray(q.p95TimeMs),
+        chalk.gray(q.maxTimeMs),
         q.hitPercent < 90 ? chalk.yellow(q.hitPercent + '%') : chalk.gray(q.hitPercent + '%'),
       ]);
     });

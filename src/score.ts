@@ -1,21 +1,13 @@
 import { AnalysisResult, HealthScore } from './types';
 
 export function computeHealthScore(result: Omit<AnalysisResult, 'healthScore'>): HealthScore {
-  // ── Slow Queries (0-25) ──────────────────────────────────────────────────────
-  // 25 = no slow queries
-  // deduct 5 per slow query found, min 0
   const slowQueryScore = Math.max(0, 25 - result.slowQueries.length * 5);
 
-  // ── Index Health (0-25) ──────────────────────────────────────────────────────
-  // 25 = no unused or bloated indexes
-  // deduct 3 per unused index, 4 per bloated index, min 0
-  const indexScore = Math.max(
-    0,
-    25 - result.unusedIndexes.length * 3 - result.bloatedIndexes.length * 4
+  const unusedPenalty = result.unusedIndexes.reduce(
+    (sum, idx) => sum + (idx.isFkSupporting ? 1 : 3), 0
   );
+  const indexScore = Math.max(0, 25 - unusedPenalty - result.bloatedIndexes.length * 4);
 
-  // ── Cache Hit Rate (0-25) ────────────────────────────────────────────────────
-  // 100% hit = 25, 90% = 15, 80% = 5, <80% = 0
   let cacheScore: number;
   if (result.cacheHitRate >= 99) cacheScore = 25;
   else if (result.cacheHitRate >= 95) cacheScore = 20;
@@ -24,15 +16,13 @@ export function computeHealthScore(result: Omit<AnalysisResult, 'healthScore'>):
   else if (result.cacheHitRate >= 80) cacheScore = 4;
   else cacheScore = 0;
 
-  // ── Lock Health (0-25) ───────────────────────────────────────────────────────
-  // 25 = no blocked queries
-  // deduct 8 per blocked query, 3 per long-running query, min 0
   const blockedCount = result.locks.filter((l) => l.blockedBy !== null).length;
+  const idleInTxCount = result.locks.filter((l) => l.isIdleInTransaction).length;
   const longRunning = result.locks.filter((l) => {
     const secs = parseInt(l.duration.replace('s', '')) || 0;
-    return secs > 30;
+    return secs > 30 && !l.isIdleInTransaction;
   }).length;
-  const lockScore = Math.max(0, 25 - blockedCount * 8 - longRunning * 3);
+  const lockScore = Math.max(0, 25 - blockedCount * 8 - idleInTxCount * 5 - longRunning * 3);
 
   const total = slowQueryScore + indexScore + cacheScore + lockScore;
 
@@ -45,12 +35,7 @@ export function computeHealthScore(result: Omit<AnalysisResult, 'healthScore'>):
 
   return {
     total,
-    breakdown: {
-      slowQueries: slowQueryScore,
-      indexHealth: indexScore,
-      cacheHitRate: cacheScore,
-      lockHealth: lockScore,
-    },
+    breakdown: { slowQueries: slowQueryScore, indexHealth: indexScore, cacheHitRate: cacheScore, lockHealth: lockScore },
     grade,
   };
 }
