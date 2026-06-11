@@ -25,7 +25,7 @@
     "url": "https://github.com/khush-shah/pg-inspector/issues"
   },
   "bin": {
-    "pg-inspector": "./bin/pg-inspector.js"
+    "pg-inspector": "bin/pg-inspector.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
