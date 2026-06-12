@@ -1,3 +1,8 @@
+export interface PlanWarning {
+  type: 'seq_scan' | 'sort_spill' | 'nested_loop' | 'high_cost';
+  message: string;
+}
+
 export interface SlowQuery {
   queryId: string;
   query: string;
@@ -13,6 +18,8 @@ export interface SlowQuery {
   spillsToDisk: boolean;
   tempBlksWritten: number;
   sharedBlksWritten: number;
+  planWarnings: PlanWarning[];
+  estimatedCost?: number;
 }
 
 export interface IndexRecommendation {
@@ -108,6 +115,62 @@ export interface HealthScore {
   grade: 'A' | 'B' | 'C' | 'D' | 'F';
 }
 
+export type WorkloadProfile = 'oltp' | 'olap' | 'mixed';
+
+export interface ProfileConfig {
+  cacheHitExcellent: number;
+  cacheHitGood: number;
+  cacheHitFair: number;
+  cacheHitPoor: number;
+  cacheHitBad: number;
+  longRunningTxSecs: number;
+}
+
+export const PROFILE_CONFIGS: Record<WorkloadProfile, ProfileConfig> = {
+  oltp: {
+    cacheHitExcellent: 99,
+    cacheHitGood:      95,
+    cacheHitFair:      90,
+    cacheHitPoor:      85,
+    cacheHitBad:       80,
+    longRunningTxSecs: 30,
+  },
+  olap: {
+    // OLAP does sequential scans — low cache hit rate is expected and normal
+    cacheHitExcellent: 75,
+    cacheHitGood:      55,
+    cacheHitFair:      35,
+    cacheHitPoor:      20,
+    cacheHitBad:       10,
+    longRunningTxSecs: 600,
+  },
+  mixed: {
+    cacheHitExcellent: 95,
+    cacheHitGood:      85,
+    cacheHitFair:      75,
+    cacheHitPoor:      65,
+    cacheHitBad:       55,
+    longRunningTxSecs: 120,
+  },
+};
+
+export interface DiffReport {
+  scoreBefore:         number;
+  scoreAfter:          number;
+  scoreDelta:          number;
+  gradeBefore:         string;
+  gradeAfter:          string;
+  newSlowQueries:      string[];
+  resolvedSlowQueries: string[];
+  newUnusedIndexes:    string[];
+  cacheHitBefore:      number;
+  cacheHitAfter:       number;
+  blockedBefore:       number;
+  blockedAfter:        number;
+  idleInTxBefore:      number;
+  idleInTxAfter:       number;
+}
+
 export interface AnalysisResult {
   connectedTo: string;
   postgresVersion: string;
@@ -122,6 +185,8 @@ export interface AnalysisResult {
   replication: ReplicationInfo[];
   indexRecommendations: IndexRecommendation[];
   cacheHitRate: number;
+  allQueryTotalMs: number;
+  profile: WorkloadProfile;
   healthScore: HealthScore;
   warnings: string[];
   errors: string[];
@@ -138,4 +203,6 @@ export interface AnalyzeOptions {
   fullQueries: boolean;
   ciMode: boolean;
   minScore: number;
+  explain?: boolean;
+  profile?: WorkloadProfile;
 }

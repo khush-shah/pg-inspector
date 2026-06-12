@@ -2,6 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import { AnalysisResult } from '../types';
 
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { version } = require('../../package.json') as { version: string };
+
 // ── JSON Reporter ─────────────────────────────────────────────────────────────
 export function renderJson(result: AnalysisResult, outFile?: string): void {
   const json = JSON.stringify(result, null, 2);
@@ -17,13 +20,14 @@ export function renderJson(result: AnalysisResult, outFile?: string): void {
 // ── HTML Reporter ─────────────────────────────────────────────────────────────
 export function renderHtml(result: AnalysisResult, outFile?: string): void {
   const { healthScore: hs } = result;
+  const profile = result.profile ?? 'oltp';
 
   const gradeColor: Record<string, string> = {
     A: '#16a34a', B: '#0891b2', C: '#ca8a04', D: '#ea580c', F: '#dc2626',
   };
   const gc = gradeColor[hs.grade] ?? '#374151';
 
-  const escHtml = (s: string) =>
+  const escHtml = (s: string): string =>
     s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   const slowQueriesHtml =
@@ -32,18 +36,21 @@ export function renderHtml(result: AnalysisResult, outFile?: string): void {
       : `<table>
           <thead><tr><th>Query</th><th>Calls</th><th>Mean (ms)</th><th>Max (ms)</th><th>Cache Hit%</th></tr></thead>
           <tbody>
-            ${result.slowQueries
-        .map(
-          (q) =>
-            `<tr>
-                    <td class="mono">${escHtml(q.query.slice(0, 120))}</td>
-                    <td>${q.calls.toLocaleString()}</td>
-                    <td class="${q.meanTimeMs > 500 ? 'warn' : ''}">${q.meanTimeMs}</td>
-                    <td>${q.maxTimeMs}</td>
-                    <td class="${q.hitPercent < 90 ? 'warn' : ''}">${q.hitPercent}%</td>
-                  </tr>`
-        )
-        .join('')}
+            ${result.slowQueries.map((q) => `
+              <tr>
+                <td>
+                  <div class="mono">${escHtml(q.query.slice(0, 120))}</div>
+                  ${q.planWarnings && q.planWarnings.length > 0
+                    ? `<div class="plan-warnings">${q.planWarnings.map((w) =>
+                        `<div class="plan-warning">⚠ ${escHtml(w.message)}</div>`
+                      ).join('')}</div>`
+                    : ''}
+                </td>
+                <td>${q.calls.toLocaleString()}</td>
+                <td class="${q.meanTimeMs > 500 ? 'warn' : ''}">${q.meanTimeMs}</td>
+                <td>${q.maxTimeMs}</td>
+                <td class="${q.hitPercent < 90 ? 'warn' : ''}">${q.hitPercent}%</td>
+              </tr>`).join('')}
           </tbody>
         </table>`;
 
@@ -53,17 +60,32 @@ export function renderHtml(result: AnalysisResult, outFile?: string): void {
       : `<table>
           <thead><tr><th>Table</th><th>Index</th><th>Size</th><th>Scans</th></tr></thead>
           <tbody>
-            ${result.unusedIndexes
-        .map(
-          (i) =>
-            `<tr>
-                    <td>${escHtml(i.table)}</td>
-                    <td class="mono warn">${escHtml(i.index)}</td>
-                    <td>${i.indexSize}</td>
-                    <td class="warn">${i.indexScans}</td>
-                  </tr>`
-        )
-        .join('')}
+            ${result.unusedIndexes.map((i) =>
+              `<tr>
+                <td>${escHtml(i.table)}</td>
+                <td class="mono warn">${escHtml(i.index)}</td>
+                <td>${i.indexSize}</td>
+                <td class="warn">${i.indexScans}</td>
+              </tr>`,
+            ).join('')}
+          </tbody>
+        </table>`;
+
+  const bloatedTablesHtml =
+    result.bloatedTables.length === 0
+      ? '<p class="ok">✓ No significantly bloated tables found</p>'
+      : `<table>
+          <thead><tr><th>Table</th><th>Size</th><th>Dead Tuples</th><th>Dead%</th><th>Last Vacuum</th></tr></thead>
+          <tbody>
+            ${result.bloatedTables.map((b) =>
+              `<tr>
+                <td>${escHtml(b.table)}</td>
+                <td>${b.tableSize}</td>
+                <td>${b.deadTuples.toLocaleString()}</td>
+                <td class="${b.deadTuplePct > 20 ? 'error' : 'warn'}">${b.deadTuplePct.toFixed(1)}%</td>
+                <td class="mono">${escHtml(b.lastAutovacuum ?? b.lastVacuum ?? 'Never')}</td>
+              </tr>`,
+            ).join('')}
           </tbody>
         </table>`;
 
@@ -73,18 +95,15 @@ export function renderHtml(result: AnalysisResult, outFile?: string): void {
       : `<table>
           <thead><tr><th>PID</th><th>Duration</th><th>State</th><th>Blocked By</th><th>Query</th></tr></thead>
           <tbody>
-            ${result.locks
-        .map(
-          (l) =>
-            `<tr>
-                    <td>${l.pid}</td>
-                    <td class="warn">${l.duration}</td>
-                    <td>${escHtml(l.state)}</td>
-                    <td class="${l.blockedBy ? 'error' : ''}">${l.blockedBy ?? '—'}</td>
-                    <td class="mono">${escHtml(l.query.slice(0, 80))}</td>
-                  </tr>`
-        )
-        .join('')}
+            ${result.locks.map((l) =>
+              `<tr>
+                <td>${l.pid}</td>
+                <td class="warn">${l.duration}</td>
+                <td>${escHtml(l.state)}</td>
+                <td class="${l.blockedBy ? 'error' : ''}">${l.blockedBy ?? '—'}</td>
+                <td class="mono">${escHtml(l.query.slice(0, 80))}</td>
+              </tr>`,
+            ).join('')}
           </tbody>
         </table>`;
 
@@ -109,14 +128,16 @@ export function renderHtml(result: AnalysisResult, outFile?: string): void {
     h2 { font-size: 1.1rem; color: #60a5fa; border-bottom: 1px solid #1e293b; padding-bottom: 8px; margin-bottom: 16px; }
     table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
     th { background: #1e293b; padding: 8px 12px; text-align: left; color: #94a3b8; font-weight: 600; }
-    td { padding: 8px 12px; border-bottom: 1px solid #1e293b; }
+    td { padding: 8px 12px; border-bottom: 1px solid #1e293b; vertical-align: top; }
     tr:hover td { background: #1e293b44; }
     .mono { font-family: 'Courier New', monospace; font-size: 0.78rem; color: #94a3b8; }
     .ok { color: #16a34a; padding: 8px 0; }
     .warn { color: #ca8a04; }
     .error { color: #dc2626; }
+    .plan-warnings { margin-top: 6px; }
+    .plan-warning { font-size: 0.76rem; color: #f59e0b; padding: 2px 0; }
     .cache-bar { background: #1e293b; border-radius: 8px; height: 20px; overflow: hidden; margin-top: 8px; }
-    .cache-fill { height: 100%; background: ${result.cacheHitRate >= 95 ? '#16a34a' : result.cacheHitRate >= 85 ? '#ca8a04' : '#dc2626'}; width: ${result.cacheHitRate}%; transition: width 1s; }
+    .cache-fill { height: 100%; background: ${result.cacheHitRate >= 95 ? '#16a34a' : result.cacheHitRate >= 85 ? '#ca8a04' : '#dc2626'}; width: ${result.cacheHitRate}%; }
     footer { color: #475569; font-size: 0.8rem; margin-top: 32px; text-align: center; }
   </style>
 </head>
@@ -125,6 +146,7 @@ export function renderHtml(result: AnalysisResult, outFile?: string): void {
   <p class="meta">
     Connected to: ${escHtml(result.connectedTo)} &nbsp;|&nbsp;
     ${result.postgresVersion.split(' ').slice(0, 2).join(' ')} &nbsp;|&nbsp;
+    Profile: ${profile.toUpperCase()} &nbsp;|&nbsp;
     ${result.analyzedAt.toLocaleString()}
   </p>
 
@@ -158,33 +180,41 @@ export function renderHtml(result: AnalysisResult, outFile?: string): void {
       : `<table>
           <thead><tr><th>Table</th><th>Index</th><th>Total Size</th><th>Bloat</th><th>Bloat%</th></tr></thead>
           <tbody>
-            ${result.bloatedIndexes.map(b =>
-        `<tr><td>${escHtml(b.table)}</td><td class="mono warn">${escHtml(b.index)}</td><td>${b.indexSize}</td><td>${b.bloatEstimate}</td><td class="warn">${b.bloatPercent}%</td></tr>`
-      ).join('')}
+            ${result.bloatedIndexes.map((b) =>
+              `<tr>
+                <td>${escHtml(b.table)}</td>
+                <td class="mono warn">${escHtml(b.index)}</td>
+                <td>${b.indexSize}</td>
+                <td>${b.bloatEstimate}</td>
+                <td class="warn">${b.bloatPercent}%</td>
+              </tr>`,
+            ).join('')}
           </tbody>
         </table>`
     }
   </section>
+
+  <section><h2>Bloated Tables</h2>${bloatedTablesHtml}</section>
 
   <section>
     <h2>N+1 Patterns</h2>
     ${result.n1Patterns.length === 0
       ? '<p class="ok">✓ No N+1 patterns detected</p>'
       : result.n1Patterns.map((p, i) =>
-        `<div style="background:#1e293b;border-radius:8px;padding:16px;margin-bottom:12px">
+          `<div style="background:#1e293b;border-radius:8px;padding:16px;margin-bottom:12px">
             <div class="mono warn">[${i + 1}] ${escHtml(p.query.slice(0, 120))}...</div>
             <div style="color:#64748b;font-size:0.82rem;margin-top:8px">
               Calls: ${p.calls.toLocaleString()} &nbsp;|&nbsp; Mean: ${p.meanTimeMs}ms &nbsp;|&nbsp; Total: ${p.totalTimeMs}ms
             </div>
             <div style="color:#94a3b8;font-size:0.82rem;margin-top:4px">${escHtml(p.suspicionReason)}</div>
-          </div>`
-      ).join('')
+          </div>`,
+        ).join('')
     }
   </section>
 
   <section><h2>Active Locks &amp; Long-Running Queries</h2>${locksHtml}</section>
 
-  <footer>pg-inspector v0.1.0 &nbsp;•&nbsp; github.com/khush-shah/pg-inspector</footer>
+  <footer>pg-inspector v${version} &nbsp;•&nbsp; github.com/khush-shah/pg-inspector</footer>
 </body>
 </html>`;
 

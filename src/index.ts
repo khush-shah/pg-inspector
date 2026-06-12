@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { createPool, getPostgresVersion, checkExtension, closePool, maskPassword } from './db';
+import { createPool, getPostgresVersion, checkExtension, closePool, maskPassword, query } from './db';
 import { analyzeSlowQueries } from './analyze/slowQueries';
 import { analyzeUnusedIndexes } from './analyze/unusedIndexes';
 import { analyzeBloat } from './analyze/bloat';
@@ -8,13 +8,15 @@ import { analyzeLocks } from './analyze/locks';
 import { analyzeCacheHitRate } from './analyze/cacheHitRate';
 import { analyzeMissingIndexes } from './analyze/missingIndexes';
 import { analyzeReplication } from './analyze/replication';
+import { captureExplainPlans } from './analyze/explainPlan';
 import { computeHealthScore } from './score';
-import { AnalysisResult, AnalyzeOptions } from './types';
+import { AnalysisResult, AnalyzeOptions, WorkloadProfile } from './types';
 
 export async function analyze(options: AnalyzeOptions): Promise<AnalysisResult> {
   const pool: Pool = createPool(options.conn, options.noSslVerify);
   const errors: string[] = [];
   const warnings: string[] = [];
+  const profile: WorkloadProfile = options.profile ?? 'oltp';
 
   try {
     const connectedTo = maskPassword(extractDbName(options.conn));
@@ -24,7 +26,7 @@ export async function analyze(options: AnalyzeOptions): Promise<AnalysisResult> 
     if (!hasPgStatStatements) {
       warnings.push(
         'pg_stat_statements extension not enabled. Slow query and N+1 analysis skipped. ' +
-        'Enable it with: CREATE EXTENSION pg_stat_statements;'
+        'Enable it with: CREATE EXTENSION pg_stat_statements;',
       );
     }
 
@@ -35,6 +37,7 @@ export async function analyze(options: AnalyzeOptions): Promise<AnalysisResult> 
       { locks, error: locksErr },
       { suggestions: missingIndexes, error: missingErr },
       { replicas: replication, error: replErr },
+      allQueryTotalMs,
     ] = await Promise.all([
       analyzeCacheHitRate(pool),
       analyzeUnusedIndexes(pool, options.limit),
@@ -42,16 +45,23 @@ export async function analyze(options: AnalyzeOptions): Promise<AnalysisResult> 
       analyzeLocks(pool, options.limit),
       analyzeMissingIndexes(pool, options.limit),
       analyzeReplication(pool),
+      (async (): Promise<number> => {
+        if (!hasPgStatStatements) return 0;
+        try {
+          const rows = await query(pool, `SELECT COALESCE(SUM(total_exec_time), 0) AS total FROM pg_stat_statements`);
+          return parseFloat(rows[0]?.total ?? '0');
+        } catch { return 0; }
+      })(),
     ]);
 
     if (unusedErr) errors.push(`Unused indexes: ${unusedErr}`);
-    if (bloatErr) errors.push(`Bloat analysis: ${bloatErr}`);
-    if (locksErr) errors.push(`Lock analysis: ${locksErr}`);
+    if (bloatErr)  errors.push(`Bloat analysis: ${bloatErr}`);
+    if (locksErr)  errors.push(`Lock analysis: ${locksErr}`);
     if (missingErr) errors.push(`Missing indexes: ${missingErr}`);
-    if (replErr) errors.push(`Replication: ${replErr}`);
+    if (replErr)   errors.push(`Replication: ${replErr}`);
 
     const [
-      { queries: slowQueries, error: slowErr },
+      { queries: rawSlowQueries, error: slowErr },
       { patterns: n1Patterns, error: n1Err },
     ] = await Promise.all([
       analyzeSlowQueries(pool, options.threshold, options.limit, options.fullQueries),
@@ -59,27 +69,52 @@ export async function analyze(options: AnalyzeOptions): Promise<AnalysisResult> 
     ]);
 
     if (slowErr) errors.push(`Slow queries: ${slowErr}`);
-    if (n1Err) errors.push(`N+1 detection: ${n1Err}`);
+    if (n1Err)   errors.push(`N+1 detection: ${n1Err}`);
 
-    if (cacheHitRate < 85) warnings.push(`Cache hit rate is ${cacheHitRate}%. Consider increasing shared_buffers.`);
+    // Optionally enrich slow queries with EXPLAIN plan warnings (--explain flag).
+    // Off by default: issues one extra query per slow query found, acceptable for
+    // manual developer runs but too noisy for automated CI.
+    let slowQueries = rawSlowQueries;
+    if (options.explain && rawSlowQueries.length > 0) {
+      const explainResults = await captureExplainPlans(pool, rawSlowQueries);
+      slowQueries = rawSlowQueries.map((q) => {
+        const explain = explainResults.find((e) => e.queryId === q.queryId);
+        return {
+          ...q,
+          planWarnings: explain?.planWarnings ?? [],
+          estimatedCost: explain?.estimatedCost,
+        };
+      });
+    }
+
+    if (cacheHitRate < 85) {
+      warnings.push(`Cache hit rate is ${cacheHitRate}%. Consider increasing shared_buffers.`);
+    }
 
     const blockedLocks = locks.filter((l) => l.blockedBy !== null);
-    if (blockedLocks.length > 0) warnings.push(`${blockedLocks.length} blocked query(ies) detected.`);
+    if (blockedLocks.length > 0) {
+      warnings.push(`${blockedLocks.length} blocked query(ies) detected.`);
+    }
 
     const idleInTx = locks.filter((l) => l.isIdleInTransaction);
-    if (idleInTx.length > 0) warnings.push(`${idleInTx.length} idle-in-transaction session(s) detected. These hold locks and can cause contention.`);
+    if (idleInTx.length > 0) {
+      warnings.push(`${idleInTx.length} idle-in-transaction session(s) detected. These hold locks and can cause contention.`);
+    }
 
     const laggingReplicas = replication.filter((r) => r.isLagging);
-    if (laggingReplicas.length > 0) warnings.push(`${laggingReplicas.length} replica(s) have replay lag > 60 seconds.`);
+    if (laggingReplicas.length > 0) {
+      warnings.push(`${laggingReplicas.length} replica(s) have replay lag > 60 seconds.`);
+    }
 
     const partial = {
       connectedTo, postgresVersion: version, analyzedAt: new Date(),
       slowQueries, unusedIndexes, bloatedIndexes, bloatedTables,
       n1Patterns, locks, missingIndexes, replication,
-      indexRecommendations: [], cacheHitRate, warnings, errors,
+      indexRecommendations: [], cacheHitRate, allQueryTotalMs, profile,
+      warnings, errors,
     };
 
-    return { ...partial, healthScore: computeHealthScore(partial) };
+    return { ...partial, healthScore: computeHealthScore(partial, profile) };
   } finally {
     await closePool();
   }

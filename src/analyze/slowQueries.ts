@@ -56,6 +56,7 @@ export async function analyzeSlowQueries(client: Pool, thresholdMs: number, limi
         spillsToDisk: parseInt(r.temp_blks_written) > 0,
         tempBlksWritten: parseInt(r.temp_blks_written),
         sharedBlksWritten: parseInt(r.shared_blks_written),
+        planWarnings: [],
       };
     });
 
